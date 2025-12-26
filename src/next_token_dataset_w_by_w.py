@@ -2,22 +2,14 @@
 import torch
 import os
 import torch.nn as nn
-
+import pandas as pd
 import re
-
 import random
-
 from datasets import load_dataset
-
 from torch.utils.data import Dataset, DataLoader
-
-from datasets import load_dataset
-
 from transformers import BertTokenizerFast
-from transformers import GPT2Tokenizer  # Меняем на GPT-2
-
+from transformers import GPT2Tokenizer
 from tqdm import tqdm
-
 from sklearn.model_selection import train_test_split
 
 # Пути к файлам
@@ -38,9 +30,7 @@ else:
 print(f"Загружено {len(dataset)} текстов")
 
 # длины последовательностей в датасете
-# seq_len = 7 => 3 токена до <MASK> + токен <MASK> + 3 токена после
 seq_len = 7
-
 
 # удаляем слишком короткие тексты
 cleaned_texts = [line for line in dataset if len(line.split()) >= seq_len]
@@ -48,44 +38,47 @@ cleaned_texts = [line for line in dataset if len(line.split()) >= seq_len]
 # для упрощения используем только max_texts_count текстов
 max_texts_count = 7000
 
-
 # разбиение на тренировочную и валидационную выборки
 val_size = 0.05
 
 train_texts, val_texts = train_test_split(cleaned_texts[:max_texts_count], test_size=val_size, random_state=42)
 print(f"Train texts: {len(train_texts)}, Val texts: {len(val_texts)}")
 
-
 # класс датасета
-class MaskedBertDataset(Dataset):
-    def __init__(self, texts, tokenizer, max_len=512, ignore_first_token=True):
-        # self.samples - список пар (x, y)
-        # x - токенизированный текст с пропущенным токеном
-        # y - пропущенный токен
-        self.seq_len=seq_len
+class NextTokenDataset(Dataset):
+    def __init__(self, texts, tokenizer, max_len=512):
         self.texts = texts
         self.tokenizer = tokenizer
         self.max_len = max_len
-        self.ignore_first_token = ignore_first_token
         self.samples = []
+        self.original_texts = []  # Сохраняем оригинальные тексты
+        self.sample_to_text_idx = []  # Сохраняем индекс текста для каждого примера
 
         print("Токенизация текстов...")
-        for line in texts:
+        for text_idx, line in enumerate(tqdm(texts)):
             token_ids = tokenizer.encode(line, add_special_tokens=True, max_length=self.max_len, truncation=True)
+            # Создаем пары для каждого токена в последовательности
             for i in range(1, len(token_ids) - 1):
-                context = token_ids[:i+1]  # все токены до текущей позиции
-                target = token_ids[i+1]    # следующий токен
-                
-                # Добавляем в samples
+                context = token_ids[1:i+1]
+                target = token_ids[i+1]
                 self.samples.append((context, target))
+                self.original_texts.append(line)  # Сохраняем оригинальный текст
+                self.sample_to_text_idx.append(text_idx)  # Сохраняем индекс текста
            
     def __len__(self):
         return len(self.samples)
 
-
     def __getitem__(self, idx):
-        x, y = self.samples[idx] # получите контекст и таргет для элемента с индексом idx
+        x, y = self.samples[idx]
         return torch.tensor(x), torch.tensor(y)
+    
+    def get_original_text(self, idx):
+        """Возвращает оригинальный текст для примера с индексом idx"""
+        return self.original_texts[idx]
+    
+    def get_text_index(self, idx):
+        """Возвращает индекс текста в исходном списке"""
+        return self.sample_to_text_idx[idx]
 
 def collate_fn(batch):
     """
@@ -101,140 +94,170 @@ def collate_fn(batch):
         padding_value=0
     )
     
-    # Y - это просто отдельные токены, их не нужно паддить
-    padded_y = torch.tensor(y_batch)
+    # Y - это просто отдельные токены
+    padded_y = torch.stack(y_batch)
     
     return padded_x, padded_y
 
 # загружаем токенизатор
 tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
 
-
 # тренировочный и валидационный датасеты
-train_dataset = MaskedBertDataset(train_texts, tokenizer)
-val_dataset = MaskedBertDataset(val_texts, tokenizer)
+train_dataset = NextTokenDataset(train_texts, tokenizer)
+val_dataset = NextTokenDataset(val_texts, tokenizer)
 
+print("DONE")
+print(f"\nDataLoader'ы созданы:")
+print(f"  Train: {len(train_dataset)} примеров")
+print(f"  Val: {len(val_dataset)} примеров")
+print(f"  Примерное число примеров на текст: {len(train_dataset) / len(train_texts):.1f}")
 
 # даталоадеры
 train_loader = DataLoader(
     train_dataset, 
     batch_size=64, 
     shuffle=True,
-    collate_fn=collate_fn  # Добавляем collate_fn
+    collate_fn=collate_fn
 )
 
 val_loader = DataLoader(
     val_dataset, 
     batch_size=64,
-    collate_fn=collate_fn  # Добавляем collate_fn
+    collate_fn=collate_fn
 )
-print("DONE")
-print(f"\nDataLoader'ы созданы:")
-print(f"  Train: {len(train_dataset)} примеров")
-print(f"  Val: {len(val_dataset)} примеров")
 
-
-
-# Демонстрация работы
+# Демонстрация работы с выводом оригинального текста
 print("\n" + "=" * 60)
-print("ДЕМОНСТРАЦИЯ РАБОТЫ:")
+print("ДЕМОНСТРАЦИЯ РАБОТЫ С ОРИГИНАЛЬНЫМИ ТЕКСТАМИ:")
 print("=" * 60)
 
 # Получаем первый батч
 batch = next(iter(train_loader))
-x_batch, y_batch = batch  # Разделяем на x и y
+x_batch, y_batch = batch
 
 print(f"\nРазмеры батча:")
-print(f"  X (context): {x_batch.shape}")  # [batch_size, max_seq_len]
-print(f"  Y (target): {y_batch.shape}")   # [batch_size] - один токен на пример
+print(f"  X (context): {x_batch.shape}")
+print(f"  Y (target): {y_batch.shape}")
 
-# Показываем несколько примеров
-print(f"\nПервые 3 примера в батче:")
-for example_idx in range(3):
+# Показываем несколько примеров с оригинальным текстом
+print(f"\nПервые 5 примеров в батче:")
+for example_idx in range(5):
     x = x_batch[example_idx]
     y = y_batch[example_idx]
+    
+    # Получаем индекс текста в датасете
+    sample_idx_in_dataset = example_idx  # Это работает только для первого батча
+    # В реальности нужно получить индекс из dataloader, но это сложно
+    # Вместо этого покажем примеры из тестового датасета
     
     print(f"\nПример {example_idx}:")
     
     # Фильтруем паддинг для X
-    x_filtered = x[x != tokenizer.pad_token_id] if tokenizer.pad_token_id is not None else x
+    x_filtered = x[x != tokenizer.pad_token_id]
     
     print(f"  X (контекст):")
     print(f"    Токены: {tokenizer.convert_ids_to_tokens(x_filtered)}")
     print(f"    Текст: {tokenizer.decode(x_filtered, skip_special_tokens=False)}")
     
     print(f"  Y (цель - следующий токен):")
-    # y - это скаляр (один токен), оборачиваем его в список
     print(f"    Токен: {tokenizer.convert_ids_to_tokens([y.item()])[0]}")
-    print(f"    ID: {y.item()}")
     
-    # Проверяем логику: какой последний токен в X и что должен быть Y
+    # Проверяем логику
     if len(x_filtered) > 0:
         last_x_token = tokenizer.convert_ids_to_tokens([x_filtered[-1].item()])[0]
         print(f"  Проверка: Последний токен X: '{last_x_token}' → Предсказанный Y: '{tokenizer.convert_ids_to_tokens([y.item()])[0]}'")
 
-# Проверяем общую статистику
-print(f"\nОбщая статистика:")
-print(f"  Всего примеров в train: {len(train_dataset)}")
-print(f"  Всего примеров в val: {len(val_dataset)}")
-print(f"  Примерное число примеров на текст: {len(train_dataset) / len(train_texts):.1f}")
-
-# Проверяем работу на тестовом примере
+# Теперь покажем примеры из тестового текста с оригинальным текстом
 print("\n" + "=" * 60)
-print("ТЕСТОВАЯ ПРОВЕРКА ЛОГИКИ:")
+print("ТЕСТОВАЯ ПРОВЕРКА ЛОГИКИ С ОРИГИНАЛЬНЫМ ТЕКСТОМ:")
 print("=" * 60)
 
 test_text = "Hello world this is a test"
-print(f"\nТестовый текст: '{test_text}'")
+print(f"\nОригинальный текст: '{test_text}'")
 
-test_tokens = tokenizer.encode(test_text, add_special_tokens=True)
-print(f"Токены с спецсимволами: {tokenizer.convert_ids_to_tokens(test_tokens)}")
-print(f"ID токенов: {test_tokens}")
-
-print(f"\nПримеры из датасета для этого текста:")
 test_texts = [test_text]
-test_dataset = MaskedBertDataset(test_texts, tokenizer)
+test_dataset = NextTokenDataset(test_texts, tokenizer)
 
-for i in range(min(5, len(test_dataset))):
+print(f"\nВсе примеры из этого текста ({len(test_dataset)} примеров):")
+
+for i in range(len(test_dataset)):
     x, y = test_dataset[i]
     
     print(f"\nПример {i}:")
+    print(f"  Оригинальный текст: '{test_dataset.get_original_text(i)}'")
     print(f"  X (контекст): {tokenizer.convert_ids_to_tokens(x)}")
     print(f"  Y (цель): {tokenizer.convert_ids_to_tokens([y.item()])[0]}")
     
-    # Проверяем логику
+    # Покажем, как это соответствует оригинальному тексту
     if len(x) > 0:
-        print(f"  Последний токен X: {tokenizer.convert_ids_to_tokens([x[-1].item()])[0]}")
-        print(f"  Предсказанный Y: {tokenizer.convert_ids_to_tokens([y.item()])[0]}")
+        context_text = tokenizer.decode(x, skip_special_tokens=True)
+        print(f"  Контекст как текст: '{context_text}'")
+        print(f"  Ожидаемое продолжение в оригинале: '{tokenizer.decode([y.item()], skip_special_tokens=True)}'")
 
-# Демонстрация генерации текста
+# Правильная демонстрация генерации
 print("\n" + "=" * 60)
-print("КАК БУДЕТ РАБОТАТЬ ГЕНЕРАЦИЯ:")
+print("ПРАВИЛЬНАЯ ДЕМОНСТРАЦИЯ ГЕНЕРАЦИИ:")
 print("=" * 60)
 
-# Симуляция работы модели
-def simulate_generation(prompt, num_steps=5):
+def demonstrate_generation(prompt, tokenizer, max_steps=20):
     print(f"\nПромпт: '{prompt}'")
-    input_ids = tokenizer.encode(prompt, add_special_tokens=True)
     
-    print("Шаги генерации:")
-    for step in range(num_steps):
-        context = input_ids  # Текущий контекст
-        # В реальности модель бы предсказала следующий токен
-        # Здесь просто берем следующий токен из исходной последовательности для демонстрации
-        if step < len(test_tokens) - 1:
-            next_token = test_tokens[step + 1]
-            input_ids.append(next_token)
-            
-            print(f"  Шаг {step+1}:")
-            print(f"    Контекст: {tokenizer.convert_ids_to_tokens(context)}")
-            print(f"    Предсказанный токен: {tokenizer.convert_ids_to_tokens([next_token])[0]}")
-            print(f"    Новый текст: {tokenizer.decode(input_ids, skip_special_tokens=True)}")
+    # Токенизируем промпт
+    input_ids = tokenizer.encode(prompt, add_special_tokens=True)
+    print(f"Токены с [CLS] и [SEP]: {tokenizer.convert_ids_to_tokens(input_ids)}")
+    
+    print("\nКак модель учится на этом тексте:")
+    
+    # Покажем все обучающие примеры из этого промпта
+    for i in range(len(input_ids) - 1):
+        context = input_ids[:i+1]
+        target = input_ids[i+1]
+        
+        print(f"\n  Пример {i+1}:")
+        print(f"    Контекст: {tokenizer.convert_ids_to_tokens(context)}")
+        print(f"    Цель: {tokenizer.convert_ids_to_tokens([target])[0]}")
+        
+        if target == tokenizer.sep_token_id:
+            print(f"    → Модель учится, что после '{tokenizer.decode(context[1:], skip_special_tokens=True)}' должен быть [SEP]")
+    
+    print("\nКак будет работать генерация в реальности:")
+    print("(В реальности модель предсказывает следующий токен на основе текущего контекста)")
+    
+    # Симуляция работы обученной модели
+    generated_ids = [tokenizer.cls_token_id]
+    generated_tokens = [tokenizer.convert_ids_to_tokens([generated_ids[0]])[0]]
+    
+    # Декодируем промпт без [CLS] для начала
+    prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
+    generated_ids.extend(prompt_ids)
+    generated_tokens.extend(tokenizer.convert_ids_to_tokens(prompt_ids))
+    
+    print(f"\n  Начальное состояние:")
+    print(f"    Токены: {generated_tokens}")
+    print(f"    Текст: '{tokenizer.decode(generated_ids, skip_special_tokens=True)}'")
+    
+    # "Предсказываем" следующие токены (в реальности это делала бы модель)
+    for step in range(max_steps):
+        # В идеальной модели, если бы она идеально выучила текст:
+        # После полного текста должен быть [SEP]
+        if len(generated_ids) >= len(input_ids):
+            next_token = tokenizer.sep_token_id
         else:
-            print("  Достигнут конец последовательности ([SEP])")
+            next_token = input_ids[len(generated_ids)]
+        
+        generated_ids.append(next_token)
+        generated_tokens.append(tokenizer.convert_ids_to_tokens([next_token])[0])
+        
+        print(f"\n  Шаг {step+1}:")
+        print(f"    Предсказанный токен: {tokenizer.convert_ids_to_tokens([next_token])[0]}")
+        print(f"    Текущий текст: '{tokenizer.decode(generated_ids, skip_special_tokens=True)}'")
+        
+        if next_token == tokenizer.sep_token_id:
+            print(f"    → Модель предсказала [SEP], генерация завершена!")
             break
 
-simulate_generation("Hello world")
+# Демонстрация
+demonstrate_generation("Hello world this is a test", tokenizer)
 
 print("\n" + "=" * 60)
 print("ПОДГОТОВКА ЗАВЕРШЕНА УСПЕШНО!")
