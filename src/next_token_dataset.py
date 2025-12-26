@@ -58,7 +58,7 @@ print(f"Train texts: {len(train_texts)}, Val texts: {len(val_texts)}")
 
 # класс датасета
 class MaskedBertDataset(Dataset):
-    def __init__(self, texts, tokenizer, max_len=512, ignore_first_token=True, seq_len=7):
+    def __init__(self, texts, tokenizer, max_len=512, ignore_first_token=True):
         # self.samples - список пар (x, y)
         # x - токенизированный текст с пропущенным токеном
         # y - пропущенный токен
@@ -72,34 +72,140 @@ class MaskedBertDataset(Dataset):
         print("Токенизация текстов...")
         for line in texts:
             token_ids = tokenizer.encode(line, add_special_tokens=False, max_length=self.max_len, truncation=True)
-            if len(token_ids) < self.seq_len:
-                continue
-            for i in range(1, len(token_ids) - 1):
-                context = token_ids[i:-1]
-                if len(context) < self.seq_len:
-                    continue
-                target = token_ids[i+1:]
-                self.samples.append((context, target))
+            context = token_ids[1:-1]
+            target = token_ids[2:]
+            self.samples.append((context, target))
            
     def __len__(self):
         return len(self.samples)
 
 
     def __getitem__(self, idx):
-        x, y = x, y = self.samples[idx] # получите контекст и таргет для элемента с индексом idx
+        x, y = self.samples[idx] # получите контекст и таргет для элемента с индексом idx
         return torch.tensor(x), torch.tensor(y)
 
+def collate_fn(batch):
+    """
+    Функция для объединения примеров в батч.
+    batch - список кортежей (x, y)
+    """
+    # Разделяем x и y
+    x_batch = [item[0] for item in batch]
+    y_batch = [item[1] for item in batch]
+    
+    # Дополняем последовательности до одинаковой длины
+    padded_x = torch.nn.utils.rnn.pad_sequence(
+        x_batch, 
+        batch_first=True, 
+        padding_value=0  # pad_token_id
+    )
+    
+    padded_y = torch.nn.utils.rnn.pad_sequence(
+        y_batch, 
+        batch_first=True, 
+        padding_value=0  # pad_token_id
+    )
+    
+    return padded_x, padded_y
 
 # загружаем токенизатор
 tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
 
 
 # тренировочный и валидационный датасеты
-train_dataset = MaskedBertDataset(train_texts, tokenizer, seq_len=seq_len)
-val_dataset = MaskedBertDataset(val_texts, tokenizer, seq_len=seq_len)
+train_dataset = MaskedBertDataset(train_texts, tokenizer)
+val_dataset = MaskedBertDataset(val_texts, tokenizer)
 
 
 # даталоадеры
-train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=64)
+train_loader = DataLoader(
+    train_dataset, 
+    batch_size=64, 
+    shuffle=True,
+    collate_fn=collate_fn  # Добавляем collate_fn
+)
+
+val_loader = DataLoader(
+    val_dataset, 
+    batch_size=64,
+    collate_fn=collate_fn  # Добавляем collate_fn
+)
 print("DONE")
+print(f"\nDataLoader'ы созданы:")
+print(f"  Train: {len(train_dataset)} примеров")
+print(f"  Val: {len(val_dataset)} примеров")
+
+
+
+# Демонстрация работы
+print("\n" + "=" * 60)
+print("ДЕМОНСТРАЦИЯ РАБОТЫ:")
+print("=" * 60)
+
+# Получаем первый батч
+batch = next(iter(train_loader))
+x_batch, y_batch = batch  # Разделяем на x и y
+
+print(f"\nРазмеры батча:")
+print(f"  X (context): {x_batch.shape}")
+print(f"  Y (target): {y_batch.shape}")
+
+# Показываем несколько примеров
+print(f"\nПервые 3 примера в батче:")
+for example_idx in range(3):
+    x = x_batch[example_idx]
+    y = y_batch[example_idx]
+    
+    print(f"\nПример {example_idx}:")
+    
+    # Фильтруем паддинг
+    x_filtered = x[x != tokenizer.pad_token_id] if tokenizer.pad_token_id is not None else x
+    y_filtered = y[y != tokenizer.pad_token_id] if tokenizer.pad_token_id is not None else y
+    
+    print(f"  X (контекст):")
+    print(f"    Токены: {tokenizer.convert_ids_to_tokens(x_filtered)}")
+    print(f"    Текст: {tokenizer.decode(x_filtered, skip_special_tokens=True)}")
+    
+    print(f"  Y (цель):")
+    print(f"    Токены: {tokenizer.convert_ids_to_tokens(y_filtered)}")
+    print(f"    Текст: {tokenizer.decode(y_filtered, skip_special_tokens=True)}")
+    
+    # Проверяем логику
+    print(f"  Проверка: Длина X: {len(x_filtered)}, Длина Y: {len(y_filtered)}")
+
+# Проверяем общую статистику
+print(f"\nОбщая статистика:")
+print(f"  Всего примеров в train: {len(train_dataset)}")
+print(f"  Всего примеров в val: {len(val_dataset)}")
+
+# Проверяем работу на тестовом примере
+print("\n" + "=" * 60)
+print("ТЕСТОВАЯ ПРОВЕРКА ЛОГИКИ:")
+print("=" * 60)
+
+test_text = "Hello world this is a test sentence for checking"
+print(f"\nТестовый текст: '{test_text}'")
+
+test_tokens = tokenizer.encode(test_text, add_special_tokens=False)
+print(f"Токены: {tokenizer.convert_ids_to_tokens(test_tokens)}")
+print(f"ID токенов: {test_tokens}")
+
+print(f"\nПримеры из датасета для этого текста:")
+test_texts = [test_text]
+test_dataset = MaskedBertDataset(test_texts, tokenizer)
+
+for i in range(min(3, len(test_dataset))):
+    x, y = test_dataset[i]
+    
+    print(f"\nПример {i}:")
+    print(f"  X: {tokenizer.convert_ids_to_tokens(x)}")
+    print(f"  Y: {tokenizer.convert_ids_to_tokens(y)}")
+    
+    # Проверяем логику
+    if len(x) > 0 and len(y) > 0:
+        print(f"  Первый токен X: {tokenizer.convert_ids_to_tokens([x[0]])[0]}")
+        print(f"  Первый токен Y: {tokenizer.convert_ids_to_tokens([y[0]])[0]}")
+    
+print("\n" + "=" * 60)
+print("ПОДГОТОВКА ЗАВЕРШЕНА УСПЕШНО!")
+print("=" * 60)
