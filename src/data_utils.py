@@ -22,6 +22,9 @@ def clean_tweet(text):
     # 4. Удалить специальные символы и цифры (опционально)
     # Оставляем только буквы и пробелы
     text = re.sub(r'[^a-z\s]', ' ', text)
+
+    # 4.5 Удалить хэштеги и символ # (важное исправление!)
+    text = re.sub(r'#', '', text)
     
     # 5. Удалить эмодзи и специальные символы Unicode
     text = re.sub(r'[^\x00-\x7F]+', '', text)
@@ -33,12 +36,6 @@ def clean_tweet(text):
     text = text.strip()
     
     return text
-
-def tokenize_text(text):
-    """
-    Простая токенизация по пробелам
-    """
-    return text.split()
 
 def process_tweets_file(input_file, output_file):
     """
@@ -52,7 +49,7 @@ def process_tweets_file(input_file, output_file):
     
     print(f"Загружено {len(tweets)} твитов")
     
-    processed_data = []
+    processed_texts = []
     
     # Обработка каждого твита с прогресс-баром
     for tweet in tqdm(tweets, desc="Обработка твитов"):
@@ -60,47 +57,29 @@ def process_tweets_file(input_file, output_file):
         
         # Пропускаем пустые строки после очистки
         if cleaned_text and len(cleaned_text) > 3:  # Минимальная длина
-            tokens = tokenize_text(cleaned_text)
-            
-            # Сохраняем как очищенный текст и как список токенов
-            processed_data.append({
-                'original': tweet.strip()[:100],  # Первые 100 символов оригинала
-                'cleaned_text': cleaned_text,
-                'tokens': tokens,
-                'token_count': len(tokens)
-            })
+            processed_texts.append(cleaned_text)
     
-    # Создание DataFrame
-    df = pd.DataFrame(processed_data)
-    
-    # Сохранение в CSV
-    df.to_csv(output_file, index=False, encoding='utf-8')
+    # Сохранение в CSV - просто текст, по одному тексту на строку
+    with open(output_file, 'w', encoding='utf-8') as f:
+        for text in processed_texts:
+            f.write(text + '\n')
     
     # Вывод статистики
     print(f"\nСтатистика обработки:")
-    print(f"Обработано твитов: {len(processed_data)}")
+    print(f"Обработано твитов: {len(processed_texts)}")
     print(f"Сохранено в файл: {output_file}")
     
-    if not df.empty:
-        avg_tokens = df['token_count'].mean()
-        print(f"Среднее количество токенов на твит: {avg_tokens:.2f}")
-        
+    if processed_texts:
         # Примеры очищенных твитов
         print("\nПримеры очищенных твитов:")
-        for i, row in df.head(3).iterrows():
-            print(f"{i+1}. Оригинал: {row['original']}...")
-            print(f"   Очищенный: {row['cleaned_text']}")
-            print(f"   Токены: {row['tokens']}")
-            print()
+        for i in range(min(3, len(processed_texts))):
+            print(f"{i+1}. {processed_texts[i][:100]}...")
     
-    return df
+    return processed_texts
 
 # Основная часть скрипта
 if __name__ == "__main__":
-    # Файлы
-    # input_file = "tweets.txt"
-    # output_file = "dataset_processed.csv"
-        # Получаем путь к директории, где находится текущий скрипт
+    # Получаем путь к директории, где находится текущий скрипт
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
     # Поднимаемся на уровень выше (из src в корень проекта)
@@ -108,14 +87,14 @@ if __name__ == "__main__":
     
     # Формируем пути
     input_file = os.path.join(project_root, "data", "tweets.txt")
-    output_file = os.path.join(project_root, "data", "dataset_processed.csv")
+    output_file = os.path.join(project_root, "data", "dataset_processed.txt")  # Меняем на .txt
     
     print(f"Путь к исходному файлу: {input_file}")
     print(f"Путь к выходному файлу: {output_file}")
     
     # Запуск обработки
     try:
-        df_processed = process_tweets_file(input_file, output_file)
+        processed_texts = process_tweets_file(input_file, output_file)
         print("Обработка завершена успешно!")
         
     except FileNotFoundError:
