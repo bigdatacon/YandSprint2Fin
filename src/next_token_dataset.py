@@ -123,108 +123,111 @@ def collate_fn(batch):
     
     return padded_x, padded_y
 
-# загружаем токенизатор
-tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
-
-# тренировочный, валидационный и тестовый датасеты
-print("\nСоздание тренировочного датасета...")
-train_dataset = NextTokenDataset(train_texts, tokenizer)
-
-print("\nСоздание валидационного датасета...")
-val_dataset = NextTokenDataset(val_texts, tokenizer)
-
-print("\nСоздание тестового датасета...")
-test_dataset = NextTokenDataset(test_texts, tokenizer)
-
-print("DONE")
-print(f"\nDataLoader'ы созданы:")
-print(f"  Train: {len(train_dataset)} примеров")
-print(f"  Val: {len(val_dataset)} примеров")
-print(f"  Test: {len(test_dataset)} примеров")
-print(f"  Примерное число примеров на текст: {len(train_dataset) / len(train_texts):.1f}")
-
-# даталоадеры
-train_loader = DataLoader(
-    train_dataset, 
-    batch_size=64, 
-    shuffle=True,
-    collate_fn=collate_fn
-)
-
-val_loader = DataLoader(
-    val_dataset, 
-    batch_size=64,
-    collate_fn=collate_fn
-)
-
-test_loader = DataLoader(
-    test_dataset,
-    batch_size=64,
-    collate_fn=collate_fn
-)
-
-# Дополнительная функция для сохранения данных
-def save_datasets(train_texts, val_texts, test_texts, tokenizer, save_dir="data/processed"):
-    """Сохраняет разделенные данные и токенизатор"""
-    os.makedirs(save_dir, exist_ok=True)
-    
-    # Сохраняем тексты
-    with open(os.path.join(save_dir, "train.txt"), "w", encoding="utf-8") as f:
-        f.write("\n".join(train_texts))
-    
-    with open(os.path.join(save_dir, "val.txt"), "w", encoding="utf-8") as f:
-        f.write("\n".join(val_texts))
+if __name__ == "__main__":
+    # загружаем токенизатор
+    tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
+    # Дополнительная функция для сохранения данных
+    def save_datasets(train_texts, val_texts, test_texts, tokenizer, save_dir="data/processed"):
+        """Сохраняет разделенные данные и токенизатор"""
+        os.makedirs(save_dir, exist_ok=True)
         
-    with open(os.path.join(save_dir, "test.txt"), "w", encoding="utf-8") as f:
-        f.write("\n".join(test_texts))
-    
-    # Сохраняем токенизатор
-    tokenizer.save_pretrained(os.path.join(save_dir, "tokenizer"))
-    
-    print(f"\nДанные сохранены в папку: {save_dir}")
-    print(f"  train.txt: {len(train_texts)} текстов")
-    print(f"  val.txt: {len(val_texts)} текстов")
-    print(f"  test.txt: {len(test_texts)} текстов")
+        # Сохраняем тексты
+        with open(os.path.join(save_dir, "train.txt"), "w", encoding="utf-8") as f:
+            f.write("\n".join(train_texts))
+        
+        with open(os.path.join(save_dir, "val.txt"), "w", encoding="utf-8") as f:
+            f.write("\n".join(val_texts))
+            
+        with open(os.path.join(save_dir, "test.txt"), "w", encoding="utf-8") as f:
+            f.write("\n".join(test_texts))
+        
+        # Сохраняем токенизатор
+        tokenizer.save_pretrained(os.path.join(save_dir, "tokenizer"))
+        
+        print(f"\nДанные сохранены в папку: {save_dir}")
+        print(f"  train.txt: {len(train_texts)} текстов")
+        print(f"  val.txt: {len(val_texts)} текстов")
+        print(f"  test.txt: {len(test_texts)} текстов")
 
-# Сохраняем данные для использования в других файлах
-save_datasets(train_texts, val_texts, test_texts, tokenizer)
+    # Сохраняем данные для использования в других файлах
+    save_datasets(train_texts, val_texts, test_texts, tokenizer)
 
-# Демонстрация работы
-print("\n" + "=" * 60)
-print("ДЕМОНСТРАЦИЯ РАБОТЫ:")
-print("=" * 60)
 
-# Получаем первый батч из тренировочного датасета
-batch = next(iter(train_loader))
-x_batch, y_batch = batch
+    # тренировочный, валидационный и тестовый датасеты
+    print("\nСоздание тренировочного датасета...")
+    train_dataset = NextTokenDataset(train_texts, tokenizer)
 
-print(f"\nРазмеры тренировочного батча:")
-print(f"  X (context): {x_batch.shape}")
-print(f"  Y (target): {y_batch.shape}")
+    print("\nСоздание валидационного датасета...")
+    val_dataset = NextTokenDataset(val_texts, tokenizer)
 
-# Проверяем работу на тестовом примере
-print("\n" + "=" * 60)
-print("ТЕСТОВАЯ ПРОВЕРКА ЛОГИКИ:")
-print("=" * 60)
+    print("\nСоздание тестового датасета...")
+    test_dataset = NextTokenDataset(test_texts, tokenizer)
 
-test_text = "Hello world this is a test"
-print(f"\nТестовый текст: '{test_text}'")
+    print("DONE")
+    print(f"\nDataLoader'ы созданы:")
+    print(f"  Train: {len(train_dataset)} примеров")
+    print(f"  Val: {len(val_dataset)} примеров")
+    print(f"  Test: {len(test_dataset)} примеров")
+    print(f"  Примерное число примеров на текст: {len(train_dataset) / len(train_texts):.1f}")
 
-test_tokens = tokenizer.encode(test_text, add_special_tokens=True)
-print(f"Токены с спецсимволами: {tokenizer.convert_ids_to_tokens(test_tokens)}")
+    # даталоадеры
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=64, 
+        shuffle=True,
+        collate_fn=collate_fn
+    )
 
-test_texts = [test_text]
-test_small_dataset = NextTokenDataset(test_texts, tokenizer)
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=64,
+        collate_fn=collate_fn
+    )
 
-print(f"\nВсе примеры из этого текста ({len(test_small_dataset)} примеров):")
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=64,
+        collate_fn=collate_fn
+    )
 
-for i in range(min(7, len(test_small_dataset))):
-    x, y = test_small_dataset[i]
-    
-    print(f"\nПример {i}:")
-    print(f"  X (контекст): {tokenizer.convert_ids_to_tokens(x)}")
-    print(f"  Y (цель): {tokenizer.convert_ids_to_tokens([y.item()])[0]}")
-    
-print("\n" + "=" * 60)
-print("ПОДГОТОВКА ДАННЫХ ЗАВЕРШЕНА УСПЕШНО!")
-print("=" * 60)
+
+
+    # Демонстрация работы
+    print("\n" + "=" * 60)
+    print("ДЕМОНСТРАЦИЯ РАБОТЫ:")
+    print("=" * 60)
+
+    # Получаем первый батч из тренировочного датасета
+    batch = next(iter(train_loader))
+    x_batch, y_batch = batch
+
+    print(f"\nРазмеры тренировочного батча:")
+    print(f"  X (context): {x_batch.shape}")
+    print(f"  Y (target): {y_batch.shape}")
+
+    # Проверяем работу на тестовом примере
+    print("\n" + "=" * 60)
+    print("ТЕСТОВАЯ ПРОВЕРКА ЛОГИКИ:")
+    print("=" * 60)
+
+    test_text = "Hello world this is a test"
+    print(f"\nТестовый текст: '{test_text}'")
+
+    test_tokens = tokenizer.encode(test_text, add_special_tokens=True)
+    print(f"Токены с спецсимволами: {tokenizer.convert_ids_to_tokens(test_tokens)}")
+
+    test_texts = [test_text]
+    test_small_dataset = NextTokenDataset(test_texts, tokenizer)
+
+    print(f"\nВсе примеры из этого текста ({len(test_small_dataset)} примеров):")
+
+    for i in range(min(7, len(test_small_dataset))):
+        x, y = test_small_dataset[i]
+        
+        print(f"\nПример {i}:")
+        print(f"  X (контекст): {tokenizer.convert_ids_to_tokens(x)}")
+        print(f"  Y (цель): {tokenizer.convert_ids_to_tokens([y.item()])[0]}")
+        
+    print("\n" + "=" * 60)
+    print("ПОДГОТОВКА ДАННЫХ ЗАВЕРШЕНА УСПЕШНО!")
+    print("=" * 60)

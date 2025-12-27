@@ -36,7 +36,30 @@ def count_parameters(model):
 
 
 if __name__ == "__main__":
-    # Только тестирование модели, без train_loader
-    vocab_size = 30522  # Примерный размер словаря BERT
-    model = BiRNNClassifier(vocab_size)
-    print(f"Тест модели: {sum(p.numel() for p in model.parameters()):,} параметров")
+    from transformers import BertTokenizerFast
+    import os
+    
+    # Определяем путь к токенизатору
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    tokenizer_path = os.path.join(project_root, "data", "processed", "tokenizer")
+    
+    # Загружаем токенизатор
+    tokenizer = BertTokenizerFast.from_pretrained(tokenizer_path)
+    vocab_size = tokenizer.vocab_size
+    
+    print(f"Размер словаря: {vocab_size}")
+    hidden_dim = 128
+
+    rnn_types = ["RNN", "GRU", "LSTM"]
+    combine_methods = ["sum", "concat"]
+
+
+    # Сравнение
+    print(f"{'RNN Type':<8} | {'Combine':<6} | {'Params':>10}")
+    print("-" * 35)
+    for rnn_type in rnn_types:
+        for combine in combine_methods:
+            model = BiRNNClassifier(vocab_size, hidden_dim, rnn_type, combine)
+            param_count = count_parameters(model)
+            print(f"{rnn_type:<8} | {combine:<6} | {param_count:>10,}") 
