@@ -81,8 +81,8 @@ class BiRNNClassifier(nn.Module):
                 current_input.append(next_token)
                 
                 # Ограничиваем длину контекста (опционально)
-                if len(current_input) > 100:  # Ограничиваем историю
-                    current_input = current_input[-100:]
+                if len(current_input) > 256:  # Ограничиваем историю
+                    current_input = current_input[-256:]
         
         return generated
 
