@@ -112,7 +112,7 @@ def main():
     # 4. Создаем модель с большими размерами
     model = BiRNNClassifier(
         vocab_size, 
-        hidden_dim=256,  # Увеличиваем скрытый слой
+        hidden_dim=128,  # Увеличиваем скрытый слой
         rnn_type="LSTM", 
         combine="concat"
     )
@@ -141,7 +141,7 @@ def main():
         return sum_loss / len(loader), correct / total
     
     # 7. Обучение с метрикой ROUGE
-    n_epochs = 10  # Увеличиваем эпохи
+    n_epochs =3  # Увеличиваем эпохи
     
     for epoch in range(n_epochs):
         model.train()
@@ -167,53 +167,54 @@ def main():
         
         # Валидация точности
         val_loss, val_acc = evaluate_accuracy(model, val_loader)
+        print(f"Epoch {epoch+1} | Train Loss: {train_loss:.3f} | Val Loss: {val_loss:.3f} | Val Acc: {val_acc:.2%}")
         
-        # Вычисляем ROUGE каждую 2-ю эпоху
-        if (epoch + 1) % 2 == 0:
-            print(f"Вычисление ROUGE метрики...")
-            rouge_scores = evaluate_with_rouge(model, val_loader, tokenizer, device)
+        # # Вычисляем ROUGE каждую 2-ю эпоху
+        # if (epoch + 1) % 2 == 0:
+        #     print(f"Вычисление ROUGE метрики...")
+        #     rouge_scores = evaluate_with_rouge(model, val_loader, tokenizer, device)
             
-            if rouge_scores:
-                print(f"Epoch {epoch+1} | Train Loss: {train_loss:.3f} | Val Loss: {val_loss:.3f} | Val Acc: {val_acc:.2%}")
-                print(f"ROUGE-1 F1: {rouge_scores['rouge-1']['f']:.4f}")
-                print(f"ROUGE-2 F1: {rouge_scores['rouge-2']['f']:.4f}")
-                print(f"ROUGE-L F1: {rouge_scores['rouge-l']['f']:.4f}")
-            else:
-                print(f"Epoch {epoch+1} | Train Loss: {train_loss:.3f} | Val Loss: {val_loss:.3f} | Val Acc: {val_acc:.2%}")
-                print("ROUGE: не удалось вычислить")
-        else:
-            print(f"Epoch {epoch+1} | Train Loss: {train_loss:.3f} | Val Loss: {val_loss:.3f} | Val Acc: {val_acc:.2%}")
+        #     if rouge_scores:
+        #         print(f"Epoch {epoch+1} | Train Loss: {train_loss:.3f} | Val Loss: {val_loss:.3f} | Val Acc: {val_acc:.2%}")
+        #         print(f"ROUGE-1 F1: {rouge_scores['rouge-1']['f']:.4f}")
+        #         print(f"ROUGE-2 F1: {rouge_scores['rouge-2']['f']:.4f}")
+        #         print(f"ROUGE-L F1: {rouge_scores['rouge-l']['f']:.4f}")
+        #     else:
+        #         print(f"Epoch {epoch+1} | Train Loss: {train_loss:.3f} | Val Loss: {val_loss:.3f} | Val Acc: {val_acc:.2%}")
+        #         print("ROUGE: не удалось вычислить")
+        # else:
+        #     print(f"Epoch {epoch+1} | Train Loss: {train_loss:.3f} | Val Loss: {val_loss:.3f} | Val Acc: {val_acc:.2%}")
         
-        # Показываем примеры генерации каждую 3-ю эпоху
-        if (epoch + 1) % 3 == 0:
-            print("\nПримеры генерации:")
-            test_prompts = [
-                "I love this movie because",
-                "The weather today is",
-                "In the future, AI will",
-            ]
+        # # Показываем примеры генерации каждую 3-ю эпоху
+        # if (epoch + 1) % 3 == 0:
+        #     print("\nПримеры генерации:")
+        #     test_prompts = [
+        #         "I love this movie because",
+        #         "The weather today is",
+        #         "In the future, AI will",
+        #     ]
             
-            for prompt in test_prompts:
-                input_ids = tokenizer.encode(prompt, add_special_tokens=False)
-                generated = model.generate_text(
-                    input_ids, 
-                    max_length=20, 
-                    temperature=0.8, 
-                    device=device,
-                    tokenizer=tokenizer
-                )
+        #     for prompt in test_prompts:
+        #         input_ids = tokenizer.encode(prompt, add_special_tokens=False)
+        #         generated = model.generate_text(
+        #             input_ids, 
+        #             max_length=20, 
+        #             temperature=0.8, 
+        #             device=device,
+        #             tokenizer=tokenizer
+        #         )
                 
-                full_text = tokenizer.decode(input_ids + generated, skip_special_tokens=True)
-                print(f"Промпт: '{prompt}'")
-                print(f"Сгенерировано: '{full_text}'")
-                print("-" * 50)
+        #         full_text = tokenizer.decode(input_ids + generated, skip_special_tokens=True)
+        #         print(f"Промпт: '{prompt}'")
+        #         print(f"Сгенерировано: '{full_text}'")
+        #         print("-" * 50)
     
     # 8. Сохраняем модель
     os.makedirs("models", exist_ok=True)
     torch.save({
         'model_state_dict': model.state_dict(),
         'vocab_size': vocab_size,
-        'hidden_dim': 256,
+        'hidden_dim': 128,
         'rnn_type': 'LSTM',
         'combine': 'concat'
     }, "models/trained_model_with_rouge.pth")

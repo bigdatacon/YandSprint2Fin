@@ -39,7 +39,7 @@ cleaned_texts = [line for line in dataset if len(line.split()) >= seq_len]
 print(f"После фильтрации осталось {len(cleaned_texts)} текстов")
 
 # для упрощения используем только max_texts_count текстов
-max_texts_count = 1700000
+max_texts_count = 170000
 
 # Разделяем данные на train/val/test
 test_size = 0.1  # 10% на тест

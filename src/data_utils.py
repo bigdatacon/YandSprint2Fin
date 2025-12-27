@@ -37,17 +37,41 @@ def clean_tweet(text):
     
     return text
 
-def process_tweets_file(input_file, output_file):
+def process_tweets_file(input_file, output_file, max_tweets=100000, random_sample=False):
     """
-    Основная функция обработки файла с твитами
+    Основная функция обработки файла с твитами с ограничением
+    
+    Args:
+        input_file: входной файл с твитами
+        output_file: выходной файл
+        max_tweets: максимальное количество твитов для обработки
+        random_sample: если True - случайная выборка, если False - первые N
     """
     print(f"Чтение файла {input_file}...")
     
-    # Чтение файла
-    with open(input_file, 'r', encoding='utf-8', errors='ignore') as f:
-        tweets = f.readlines()
-    
-    print(f"Загружено {len(tweets)} твитов")
+    if random_sample:
+        # Читаем все строки для случайной выборки
+        with open(input_file, 'r', encoding='utf-8', errors='ignore') as f:
+            all_tweets = f.readlines()
+        
+        print(f"Всего твитов в файле: {len(all_tweets)}")
+        
+        if len(all_tweets) > max_tweets:
+            tweets = random.sample(all_tweets, max_tweets)
+            print(f"Взята случайная выборка из {max_tweets} твитов")
+        else:
+            tweets = all_tweets
+            print(f"Используются все {len(tweets)} твитов")
+    else:
+        # Читаем только первые N строк
+        tweets = []
+        with open(input_file, 'r', encoding='utf-8', errors='ignore') as f:
+            for i, line in enumerate(f):
+                if i >= max_tweets:
+                    break
+                tweets.append(line)
+        
+        print(f"Загружено {len(tweets)} твитов (первые {max_tweets})")
     
     processed_texts = []
     
@@ -55,25 +79,18 @@ def process_tweets_file(input_file, output_file):
     for tweet in tqdm(tweets, desc="Обработка твитов"):
         cleaned_text = clean_tweet(tweet)
         
-        # Пропускаем пустые строки после очистки
-        if cleaned_text and len(cleaned_text) > 3:  # Минимальная длина
+        if cleaned_text and len(cleaned_text) > 3:
             processed_texts.append(cleaned_text)
     
-    # Сохранение в CSV - просто текст, по одному тексту на строку
+    # Сохранение
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
     with open(output_file, 'w', encoding='utf-8') as f:
         for text in processed_texts:
             f.write(text + '\n')
     
-    # Вывод статистики
-    print(f"\nСтатистика обработки:")
+    print(f"\nСтатистика:")
     print(f"Обработано твитов: {len(processed_texts)}")
-    print(f"Сохранено в файл: {output_file}")
-    
-    if processed_texts:
-        # Примеры очищенных твитов
-        print("\nПримеры очищенных твитов:")
-        for i in range(min(3, len(processed_texts))):
-            print(f"{i+1}. {processed_texts[i][:100]}...")
+    print(f"Сохранено в: {output_file}")
     
     return processed_texts
 
