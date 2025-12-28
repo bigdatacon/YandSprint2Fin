@@ -12,16 +12,13 @@ rouge_metric = evaluate.load("rouge")
 
 
 def generate_and_evaluate(model, tokenizer, text, device):
-    """
-    Генерация и вычисление ROUGE для одного текста:
-    - один токен
-    - 1/4 текста
-    """
     tokens = tokenizer.encode(text, add_special_tokens=True)
     if len(tokens) < 2:
         return None
 
+    # -----------------------------
     # 1️⃣ Генерация одного токена
+    # -----------------------------
     context_one_token = tokens[:-1]
     target_one_token = [tokens[-1]]
     generated_one = model.generate_text(
@@ -31,8 +28,12 @@ def generate_and_evaluate(model, tokenizer, text, device):
         device=device,
         tokenizer=tokenizer
     )
+    # Берём только новый токен
+    generated_one_token = generated_one[-1:]
 
+    # -----------------------------
     # 2️⃣ Генерация 1/4 текста
+    # -----------------------------
     context_len = int(len(tokens) * 0.75)
     context_quarter = tokens[:context_len]
     target_quarter = tokens[context_len:]
@@ -43,16 +44,22 @@ def generate_and_evaluate(model, tokenizer, text, device):
         device=device,
         tokenizer=tokenizer
     )
+    # Берём только сгенерированное продолжение
+    generated_quarter_only = generated_quarter[len(context_quarter):]
 
-    # Декодируем для печати
+    # -----------------------------
+    # Декодирование для печати
+    # -----------------------------
+    original_text = tokenizer.decode(tokens, skip_special_tokens=True)
     context_text = tokenizer.decode(context_quarter, skip_special_tokens=True)
-    gen_one_text = tokenizer.decode(generated_one, skip_special_tokens=True)
-    gen_quarter_text = tokenizer.decode(generated_quarter, skip_special_tokens=True)
+    gen_one_text = tokenizer.decode(generated_one_token, skip_special_tokens=True)
+    gen_quarter_text = tokenizer.decode(generated_quarter_only, skip_special_tokens=True)
     target_one_text = tokenizer.decode(target_one_token, skip_special_tokens=True)
     target_quarter_text = tokenizer.decode(target_quarter, skip_special_tokens=True)
-    original_text = tokenizer.decode(tokens, skip_special_tokens=True)
 
+    # -----------------------------
     # ROUGE
+    # -----------------------------
     rouge_one = rouge_metric.compute(predictions=[gen_one_text], references=[target_one_text])
     rouge_quarter = rouge_metric.compute(predictions=[gen_quarter_text], references=[target_quarter_text])
 
@@ -66,6 +73,7 @@ def generate_and_evaluate(model, tokenizer, text, device):
         "rouge_one": rouge_one,
         "rouge_quarter": rouge_quarter
     }
+
 
 
 def main():
