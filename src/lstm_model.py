@@ -61,30 +61,84 @@ class BiRNNClassifier(nn.Module):
             
             return next_token.item()
     
+    # В классе BiRNNClassifier исправьте метод generate_text:
     def generate_text(self, input_ids, max_length=50, temperature=1.0, device='cpu', tokenizer=None):
         """Генерация текста до конца фразы"""
         self.eval()
         generated = []
         
         with torch.no_grad():
+            # Копируем входные токены
             current_input = input_ids.copy() if isinstance(input_ids, list) else input_ids.tolist()
             
+            # Удаляем [CLS] и [SEP] из контекста, если они есть
+            if tokenizer:
+                # Удаляем [CLS] (101) из начала, если он есть
+                if current_input and current_input[0] == tokenizer.cls_token_id:
+                    current_input = current_input[1:]
+                
+                # Удаляем [SEP] (102) из конца, если он есть
+                if current_input and current_input[-1] == tokenizer.sep_token_id:
+                    current_input = current_input[:-1]
+            
             for _ in range(max_length):
+                if not current_input:  # Защита от пустого контекста
+                    break
+                    
                 # Предсказываем следующий токен
                 next_token = self.predict_next_token(current_input, temperature, device)
                 
-                # Если [SEP] или длина слишком большая - останавливаемся
-                if tokenizer and next_token == tokenizer.sep_token_id:
-                    break
-                    
+                # Пропускаем служебные токены при генерации
+                if tokenizer:
+                    # Если сгенерировали служебный токен - пропускаем
+                    if next_token in [tokenizer.cls_token_id, tokenizer.sep_token_id, tokenizer.pad_token_id]:
+                        continue
+                        
                 generated.append(next_token)
                 current_input.append(next_token)
                 
-                # Ограничиваем длину контекста (опционально)
-                if len(current_input) > 256:  # Ограничиваем историю
+                # Ограничиваем длину контекста
+                if len(current_input) > 256:
                     current_input = current_input[-256:]
+            
+            # Если ничего не сгенерировали, попробуем самый частый токен
+            if not generated and tokenizer:
+                # Берем самый частый токен (кроме служебных)
+                vocab = tokenizer.get_vocab()
+                # Исключаем служебные токены
+                excluded_ids = [tokenizer.cls_token_id, tokenizer.sep_token_id, tokenizer.pad_token_id, tokenizer.mask_token_id]
+                common_tokens = [id for id, token in vocab.items() 
+                            if id not in excluded_ids and token not in ['[UNK]', '[PAD]', '[CLS]', '[SEP]', '[MASK]']]
+                if common_tokens:
+                    generated = [common_tokens[0]]
         
         return generated
+
+
+    # def generate_text(self, input_ids, max_length=50, temperature=1.0, device='cpu', tokenizer=None):
+    #     """Генерация текста до конца фразы"""
+    #     self.eval()
+    #     generated = []
+        
+    #     with torch.no_grad():
+    #         current_input = input_ids.copy() if isinstance(input_ids, list) else input_ids.tolist()
+            
+    #         for _ in range(max_length):
+    #             # Предсказываем следующий токен
+    #             next_token = self.predict_next_token(current_input, temperature, device)
+                
+    #             # Если [SEP] или длина слишком большая - останавливаемся
+    #             if tokenizer and next_token == tokenizer.sep_token_id:
+    #                 break
+                    
+    #             generated.append(next_token)
+    #             current_input.append(next_token)
+                
+    #             # Ограничиваем длину контекста (опционально)
+    #             if len(current_input) > 256:  # Ограничиваем историю
+    #                 current_input = current_input[-256:]
+        
+    #     return generated
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters())
