@@ -5,140 +5,75 @@ from tqdm import tqdm
 
 
 class BiRNNClassifier(nn.Module):
-    def __init__(self, vocab_size, hidden_dim=128, rnn_type="LSTM", combine="concat"):
+    def __init__(self, vocab_size, emb_dim=128, hidden_dim=128, num_layers=1):
         super().__init__()
-        self.hidden_dim = hidden_dim
-        self.vocab_size = vocab_size
-        self.embedding = nn.Embedding(vocab_size, hidden_dim)
-        self.combine = combine
+        self.embedding = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
+        self.lstm = nn.LSTM(
+            emb_dim,
+            hidden_dim,
+            num_layers=num_layers,
+            batch_first=True
+        )
+        self.fc = nn.Linear(hidden_dim, vocab_size)
+        
+    def forward(self, input_ids, hidden=None):
 
-        rnn_cls = {"RNN": nn.RNN, "GRU": nn.GRU, "LSTM": nn.LSTM}[rnn_type]
-        self.rnn = rnn_cls(hidden_dim, hidden_dim, batch_first=True, bidirectional=True)
-
-        out_dim = hidden_dim * 2 if combine == "concat" else hidden_dim
-        self.fc = nn.Linear(out_dim, vocab_size)
-        
-    def forward(self, x):
-        emb = self.embedding(x)
-        out, _ = self.rnn(emb)
-        
-        # ИЗМЕНЕНИЕ: берем последние состояния, а не центральные
-        # Для forward RNN: последний токен первой половины
-        # Для backward RNN: первый токен второй половины
-        seq_len = out.size(1)
-        hidden_forward = out[:, -1, :self.hidden_dim]  # последний токен forward
-        hidden_backward = out[:, 0, self.hidden_dim:]  # первый токен backward
-        
-        if self.combine == "sum":
-            hidden_agg = hidden_forward + hidden_backward
-        else:  # concat
-            hidden_agg = torch.cat([hidden_forward, hidden_backward], dim=1)
-        
-        linear_out = self.fc(hidden_agg)
-        return linear_out
+        emb = self.embedding(input_ids)
+        out, hidden = self.lstm(emb, hidden)
+        logits = self.fc(out)
+        return logits, hidden
     
-    def predict_next_token(self, input_ids, temperature=1.0, device='cpu'):
-        """Предсказание одного следующего токена"""
+    def predict_next_token(self, input_ids, temperature=1.0, device="cpu"):
         self.eval()
+
         with torch.no_grad():
-            # Преобразуем в тензор
             if isinstance(input_ids, list):
-                input_tensor = torch.tensor([input_ids]).to(device)
+                input_ids = torch.tensor([input_ids], device=device)
+            elif input_ids.dim() == 1:
+                input_ids = input_ids.unsqueeze(0).to(device)
             else:
-                input_tensor = input_ids.unsqueeze(0).to(device) if input_ids.dim() == 1 else input_ids.to(device)
-            
-            # Получаем логиты
-            logits = self.forward(input_tensor)
-            
-            # Применяем температуру
-            logits = logits / temperature
-            
-            # Softmax для вероятностей
+                input_ids = input_ids.to(device)
+
+            logits, _ = self(input_ids)
+
+            # берём логиты последнего токена
+            logits = logits[:, -1, :] / temperature
+
             probs = torch.softmax(logits, dim=-1)
-            
-            # Сэмплируем следующий токен
             next_token = torch.multinomial(probs, num_samples=1)
-            
+
             return next_token.item()
     
-    # В классе BiRNNClassifier исправьте метод generate_text:
-    def generate_text(self, input_ids, max_length=50, temperature=1.0, device='cpu', tokenizer=None):
-        """Генерация текста до конца фразы"""
+    def generate_text(self, input_ids, max_new_tokens=50, temperature=1.0, device="cpu", tokenizer=None):
         self.eval()
-        generated = []
-        
+
         with torch.no_grad():
-            # Копируем входные токены
-            current_input = input_ids.copy() if isinstance(input_ids, list) else input_ids.tolist()
-            
-            # Удаляем [CLS] и [SEP] из контекста, если они есть
-            if tokenizer:
-                # Удаляем [CLS] (101) из начала, если он есть
-                if current_input and current_input[0] == tokenizer.cls_token_id:
-                    current_input = current_input[1:]
-                
-                # Удаляем [SEP] (102) из конца, если он есть
-                if current_input and current_input[-1] == tokenizer.sep_token_id:
-                    current_input = current_input[:-1]
-            
-            for _ in range(max_length):
-                if not current_input:  # Защита от пустого контекста
+            if isinstance(input_ids, list):
+                generated = input_ids.copy()
+            else:
+                generated = input_ids.tolist()
+
+            for _ in range(max_new_tokens):
+                next_token = self.predict_next_token(
+                    generated,
+                    temperature=temperature,
+                    device=device
+                )
+
+                # стоп-токен
+                if tokenizer and next_token == tokenizer.sep_token_id:
                     break
-                    
-                # Предсказываем следующий токен
-                next_token = self.predict_next_token(current_input, temperature, device)
-                
-                # Пропускаем служебные токены при генерации
-                if tokenizer:
-                    # Если сгенерировали служебный токен - пропускаем
-                    if next_token in [tokenizer.cls_token_id, tokenizer.sep_token_id, tokenizer.pad_token_id]:
-                        continue
-                        
+
                 generated.append(next_token)
-                current_input.append(next_token)
-                
-                # Ограничиваем длину контекста
-                if len(current_input) > 256:
-                    current_input = current_input[-256:]
-            
-            # Если ничего не сгенерировали, попробуем самый частый токен
-            if not generated and tokenizer:
-                # Берем самый частый токен (кроме служебных)
-                vocab = tokenizer.get_vocab()
-                # Исключаем служебные токены
-                excluded_ids = [tokenizer.cls_token_id, tokenizer.sep_token_id, tokenizer.pad_token_id, tokenizer.mask_token_id]
-                common_tokens = [id for id, token in vocab.items() 
-                            if id not in excluded_ids and token not in ['[UNK]', '[PAD]', '[CLS]', '[SEP]', '[MASK]']]
-                if common_tokens:
-                    generated = [common_tokens[0]]
-        
-        return generated
+
+                # ограничение контекста
+                if len(generated) > 256:
+                    generated = generated[-256:]
+
+            return generated
 
 
-    # def generate_text(self, input_ids, max_length=50, temperature=1.0, device='cpu', tokenizer=None):
-    #     """Генерация текста до конца фразы"""
-    #     self.eval()
-    #     generated = []
-        
-    #     with torch.no_grad():
-    #         current_input = input_ids.copy() if isinstance(input_ids, list) else input_ids.tolist()
-            
-    #         for _ in range(max_length):
-    #             # Предсказываем следующий токен
-    #             next_token = self.predict_next_token(current_input, temperature, device)
-                
-    #             # Если [SEP] или длина слишком большая - останавливаемся
-    #             if tokenizer and next_token == tokenizer.sep_token_id:
-    #                 break
-                    
-    #             generated.append(next_token)
-    #             current_input.append(next_token)
-                
-    #             # Ограничиваем длину контекста (опционально)
-    #             if len(current_input) > 256:  # Ограничиваем историю
-    #                 current_input = current_input[-256:]
-        
-    #     return generated
+
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters())
@@ -168,6 +103,6 @@ if __name__ == "__main__":
     print("-" * 35)
     for rnn_type in rnn_types:
         for combine in combine_methods:
-            model = BiRNNClassifier(vocab_size, hidden_dim, rnn_type, combine)
+            model = BiRNNClassifier(vocab_size=vocab_size, emb_dim=128,hidden_dim=128)
             param_count = count_parameters(model)
             print(f"{rnn_type:<8} | {combine:<6} | {param_count:>10,}") 

@@ -1,141 +1,133 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-import evaluate
-import numpy as np 
-from tqdm import tqdm
 import torch
-import torch.nn as nn
-import os
-import numpy as np
-from tqdm import tqdm
 from torch.utils.data import DataLoader
 from transformers import BertTokenizerFast
 from lstm_model import BiRNNClassifier
-from next_token_dataset import NextTokenDataset, collate_fn
-from rouge import Rouge  # pip install rouge
+import os
+from tqdm import tqdm
+import evaluate
+import numpy as np
+
+# Загружаем метрику ROUGE
+rouge_metric = evaluate.load("rouge")
 
 
-# Загружаем метрику
-rouge = evaluate.load("rouge")
+def generate_and_evaluate(model, tokenizer, text, device):
+    """
+    Генерация и вычисление ROUGE для одного текста:
+    - один токен
+    - 1/4 текста
+    """
+    tokens = tokenizer.encode(text, add_special_tokens=True)
+    if len(tokens) < 2:
+        return None
 
-def test_text_generation():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    # Загружаем модель
-    model_path = "models/trained_model_with_rouge.pth"
+    # 1️⃣ Генерация одного токена
+    context_one_token = tokens[:-1]
+    target_one_token = [tokens[-1]]
+    generated_one = model.generate_text(
+        context_one_token,
+        max_new_tokens=1,
+        temperature=0.8,
+        device=device,
+        tokenizer=tokenizer
+    )
+
+    # 2️⃣ Генерация 1/4 текста
+    context_len = int(len(tokens) * 0.75)
+    context_quarter = tokens[:context_len]
+    target_quarter = tokens[context_len:]
+    generated_quarter = model.generate_text(
+        context_quarter,
+        max_new_tokens=len(target_quarter),
+        temperature=0.8,
+        device=device,
+        tokenizer=tokenizer
+    )
+
+    # Декодируем для печати
+    context_text = tokenizer.decode(context_quarter, skip_special_tokens=True)
+    gen_one_text = tokenizer.decode(generated_one, skip_special_tokens=True)
+    gen_quarter_text = tokenizer.decode(generated_quarter, skip_special_tokens=True)
+    target_one_text = tokenizer.decode(target_one_token, skip_special_tokens=True)
+    target_quarter_text = tokenizer.decode(target_quarter, skip_special_tokens=True)
+    original_text = tokenizer.decode(tokens, skip_special_tokens=True)
+
+    # ROUGE
+    rouge_one = rouge_metric.compute(predictions=[gen_one_text], references=[target_one_text])
+    rouge_quarter = rouge_metric.compute(predictions=[gen_quarter_text], references=[target_quarter_text])
+
+    return {
+        "original": original_text,
+        "context": context_text,
+        "generated_one": gen_one_text,
+        "generated_quarter": gen_quarter_text,
+        "target_one": target_one_text,
+        "target_quarter": target_quarter_text,
+        "rouge_one": rouge_one,
+        "rouge_quarter": rouge_quarter
+    }
+
+
+def main():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Путь к модели и токенизатору
+    model_path = "models/birnn_lstm_lm.pth"
     checkpoint = torch.load(model_path, map_location=device)
-    
-    tokenizer = BertTokenizerFast.from_pretrained("data/processed/tokenizer")
-    
+    tokenizer_path = "data/processed/tokenizer"
+
+    # Загружаем токенизатор
+    tokenizer = BertTokenizerFast.from_pretrained(tokenizer_path)
+
+    # Загружаем модель
+    checkpoint = torch.load(model_path, map_location=device)
     model = BiRNNClassifier(
         vocab_size=checkpoint['vocab_size'],
-        hidden_dim=checkpoint['hidden_dim'],
-        rnn_type=checkpoint['rnn_type'],
-        combine=checkpoint['combine']
+        hidden_dim=checkpoint['hidden_dim']
     )
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
     model.eval()
-    
-    print("\n" + "=" * 60)
-    print("ТЕСТИРОВАНИЕ ГЕНЕРАЦИИ ТЕКСТА (ДОПИСЫВАНИЕ)")
-    print("=" * 60)
-    
-    test_prompts = [
-        "really sad ads is leaving me for three weeks now not two...",
-        "storm woke me up i hope it wont be like this all day...",
-        "I love this movie because",
-        "The weather today is",
-        "In the future, AI will",
-        "I think that",
-        "Yesterday I went to",
-    ]
-    
-    for prompt in test_prompts:
-        print(f"\nПромпт: '{prompt}'")
-        
-        # Генерируем продолжение
-        input_ids = tokenizer.encode(prompt, add_special_tokens=True)
-        generated = model.generate_text(
-            input_ids, 
-            max_length=50, 
-            temperature=0.8, 
-            device=device,
-            tokenizer=tokenizer
-        )
-        
-        # Декодируем результат
-        full_text = tokenizer.decode(input_ids + generated, skip_special_tokens=True)
-        
-        print(f"Сгенерированный текст ({len(generated)} токенов):")
-        print(f"  '{full_text}'")
-        
-        # Показываем, где закончился промпт
-        prompt_text = tokenizer.decode(input_ids, skip_special_tokens=True)
-        generated_text = tokenizer.decode(generated, skip_special_tokens=True)
-        print(f"  Промпт: '{prompt_text}'")
-        print(f"  Дописано: '{generated_text}'")
-        print("-" * 50)
-    
-    # Тест с реальными текстами из валидации
-    print("\n" + "=" * 60)
-    print("ТЕСТ С РЕАЛЬНЫМИ ТЕКСТАМИ (3/4 текста -> предсказание 1/4)")
-    print("=" * 60)
-    
-    def load_texts(file_path):
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return [line.strip() for line in f]
-    
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)
-    data_dir = os.path.join(project_root, "data", "processed")
-    
-    val_texts = load_texts(os.path.join(data_dir, "val.txt"))
-    
-    for i, text in enumerate(val_texts[:10]):
-        print(f"\nПример {i+1}:")
-        print(f"  Полный текст: '{text[:100]}...'")
-        
-        # Токенизируем весь текст
-        all_tokens = tokenizer.encode(text, add_special_tokens=True)
-        
-        if len(all_tokens) > 10:
-            # Берем 3/4 текста как промпт
-            print(f"all_tokens : {all_tokens}")
-            context_len = int(len(all_tokens) * 0.75)
-            context = all_tokens[:context_len]
-            target = all_tokens[context_len:]  # Оставшиеся 1/4 (правильный ответ)
-            
-            # Генерируем продолжение
-            generated = model.generate_text(
-                context, 
-                max_length=len(target) + 10,  # Немного больше для надежности
-                temperature=0.8, 
-                device=device,
-                tokenizer=tokenizer
-            )
-            
-            # Декодируем
-            context_text = tokenizer.decode(context, skip_special_tokens=True)
-            generated_text = tokenizer.decode(generated, skip_special_tokens=True)
-            target_text = tokenizer.decode(target, skip_special_tokens=True)
-            
-            print(f"  Промпт (3/4): '{context_text}...'")
-            print(f"  Сгенерировано (1/4): '{generated_text}'")
-            print(f"  Правильный ответ: '{target_text}'")
-            
-                # Вычисляем метрику ROUGE - ПРАВИЛЬНО: передаем списки!
-            results = rouge.compute(
-                predictions=[generated_text],  # Список из одного элемента
-                references=[target_text]       # Список из одного элемента
-            )
-            # Вычисляем метрику
-            # results = rouge.compute(predictions=[out[0]["generated_text"]], references=[text])
 
-            # Печатаем значения
-            for key, value in results.items():
-                print(f"{key}: {value:.4f}") 
-        
-        print("-" * 50)
+    # Загружаем тестовые тексты
+    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "processed")
+    test_file = os.path.join(data_dir, "test.txt")
+    with open(test_file, "r", encoding="utf-8") as f:
+        test_texts = [line.strip() for line in f]
+
+    # 1️⃣ Вывод первых 10 примеров
+    print("\n=== ПЕРВЫЕ 10 ТЕСТОВЫХ ПРИМЕРОВ ===")
+    for i, text in enumerate(test_texts[:10]):
+        res = generate_and_evaluate(model, tokenizer, text, device)
+        if res is None:
+            continue
+
+        print(f"\nПример {i+1}:")
+        print(f"Оригинальный текст: {res['original']}")
+        print(f"Промт (3/4 текста): {res['context']}")
+        print(f"Сгенерировано один токен: {res['generated_one']} (правильный: {res['target_one']})")
+        print(f"Сгенерировано 1/4 текста: {res['generated_quarter']} (правильное продолжение: {res['target_quarter']})")
+        print("-" * 80)
+
+    # 2️⃣ Вычисление среднего ROUGE для следующих 100 примеров
+    print("\n=== СРЕДНИЙ ROUGE ПО 100 ТЕСТАМ ===")
+    rouge_one_scores = []
+    rouge_quarter_scores = []
+
+    for text in tqdm(test_texts[10:110], desc="Calculating average ROUGE"):
+        res = generate_and_evaluate(model, tokenizer, text, device)
+        if res is None:
+            continue
+        # Усредняем только F1 score
+        rouge_one_scores.append(res['rouge_one']['rouge1'])
+        rouge_quarter_scores.append(res['rouge_quarter']['rouge1'])
+
+    avg_rouge_one = np.mean(rouge_one_scores) if rouge_one_scores else 0.0
+    avg_rouge_quarter = np.mean(rouge_quarter_scores) if rouge_quarter_scores else 0.0
+
+    print(f"Средний ROUGE-1 для одного токена: {avg_rouge_one:.4f}")
+    print(f"Средний ROUGE-1 для 1/4 текста: {avg_rouge_quarter:.4f}")
+
 
 if __name__ == "__main__":
-    test_text_generation()
+    main()

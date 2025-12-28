@@ -82,12 +82,19 @@ class NextTokenDataset(Dataset):
         for text_idx, line in enumerate(tqdm(texts)):
             token_ids = tokenizer.encode(line, add_special_tokens=True, max_length=self.max_len, truncation=True)
             # Создаем пары для каждого токена в последовательности
-            for i in range(1, len(token_ids) - 1):
-                context = token_ids[1:i+1]
-                target = token_ids[i+1]
-                self.samples.append((context, target))
-                self.original_texts.append(line)  # Сохраняем оригинальный текст
-                self.sample_to_text_idx.append(text_idx)  # Сохраняем индекс текста
+            if len(token_ids) < 2:
+                continue
+            input_ids = token_ids[:-1]
+            target_ids = token_ids[1:]
+            self.samples.append((input_ids, target_ids))
+            self.original_texts.append(line)  # Сохраняем оригинальный текст
+            self.sample_to_text_idx.append(text_idx)  # Сохраняем индекс текста
+            # for i in range(1, len(token_ids) - 1):
+            #     context = token_ids[1:i+1]
+            #     target = token_ids[i+1]
+            #     self.samples.append((context, target))
+            #     self.original_texts.append(line)  # Сохраняем оригинальный текст
+            #     self.sample_to_text_idx.append(text_idx)  # Сохраняем индекс текста
            
     def __len__(self):
         return len(self.samples)
@@ -105,23 +112,32 @@ class NextTokenDataset(Dataset):
         return self.sample_to_text_idx[idx]
 
 def collate_fn(batch):
-    """
-    Функция для объединения примеров в батч.
-    """
-    x_batch = [item[0] for item in batch]
-    y_batch = [item[1] for item in batch]
+    xs, ys = zip(*batch)
+
+    xs = torch.nn.utils.rnn.pad_sequence(xs, batch_first=True, padding_value=0)
+    ys = torch.nn.utils.rnn.pad_sequence(ys, batch_first=True, padding_value=0)
+
+    return xs, ys
+
+
+# def collate_fn(batch):
+#     """
+#     Функция для объединения примеров в батч.
+#     """
+#     x_batch = [item[0] for item in batch]
+#     y_batch = [item[1] for item in batch]
     
-    # Дополняем X до одинаковой длины
-    padded_x = torch.nn.utils.rnn.pad_sequence(
-        x_batch, 
-        batch_first=True, 
-        padding_value=0
-    )
+#     # Дополняем X до одинаковой длины
+#     padded_x = torch.nn.utils.rnn.pad_sequence(
+#         x_batch, 
+#         batch_first=True, 
+#         padding_value=0
+#     )
     
-    # Y - это просто отдельные токены
-    padded_y = torch.stack(y_batch)
+#     # Y - это просто отдельные токены
+#     padded_y = torch.stack(y_batch)
     
-    return padded_x, padded_y
+#     return padded_x, padded_y
 
 if __name__ == "__main__":
     # загружаем токенизатор
@@ -225,8 +241,14 @@ if __name__ == "__main__":
         x, y = test_small_dataset[i]
         
         print(f"\nПример {i}:")
-        print(f"  X (контекст): {tokenizer.convert_ids_to_tokens(x)}")
-        print(f"  Y (цель): {tokenizer.convert_ids_to_tokens([y.item()])[0]}")
+        # print(f"  X (контекст): {tokenizer.convert_ids_to_tokens(x)}")
+        # print(f"  Y (цель): {tokenizer.convert_ids_to_tokens([y.item()])[0]}")
+        x_tokens = tokenizer.convert_ids_to_tokens(x.tolist())
+        y_tokens = tokenizer.convert_ids_to_tokens(y.tolist())
+
+        print("Контекст → цель:")
+        print(f"{x_tokens[-1]} → {y_tokens[-1]}")
+
         
     print("\n" + "=" * 60)
     print("ПОДГОТОВКА ДАННЫХ ЗАВЕРШЕНА УСПЕШНО!")
