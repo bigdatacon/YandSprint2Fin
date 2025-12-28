@@ -38,24 +38,24 @@ def generate_and_evaluate(model, tokenizer, text, device):
     generated_one = model.generate_text(
         context_one_token,
         max_new_tokens=1,
-        temperature=0.8,
+        temperature=1.0,
         device=device,
         tokenizer=tokenizer
     )
     generated_one_token = generated_one[-1:]  # последний токен
 
     # 2️⃣ Генерация 1/4 текста, начиная с сгенерированного токена
-    context_quarter = context_one_token + generated_one_token
-    remaining_len = len(target_quarter) - 1  # первый токен уже сгенерирован
+    # context_quarter = context_one_token + generated_one_token
+    remaining_len = len(target_quarter)  
     generated_quarter = model.generate_text(
-        context_quarter,
+        context_one_token,
         max_new_tokens=remaining_len,
-        temperature=0.8,
+        temperature=1,
         device=device,
         tokenizer=tokenizer
     )
     # Берём только сгенерированное продолжение четверти текста
-    generated_quarter_only = generated_quarter[len(context_one_token):]
+    generated_quarter_only = generated_one_token + generated_quarter[len(context_one_token):]
 
     # Декодирование
     original_text = tokenizer.decode(tokens, skip_special_tokens=True)
@@ -89,7 +89,7 @@ def evaluate_texts(model, tokenizer, texts, device, print_examples=True):
     # Печать первых 10 примеров
     if print_examples:
         print("\n=== ПЕРВЫЕ 10 ТЕСТОВЫХ ПРИМЕРОВ ===")
-        for i, text in enumerate(texts[:10]):
+        for i, text in enumerate(texts[20:30]):
             res = generate_and_evaluate(model, tokenizer, text, device)
             if res is None:
                 continue
@@ -104,7 +104,7 @@ def evaluate_texts(model, tokenizer, texts, device, print_examples=True):
             print("-" * 80)
 
     # Усреднение ROUGE по всем текстам
-    for text in tqdm(texts[10:110], desc="Calculating average ROUGE"):
+    for text in tqdm(texts[:210], desc="Calculating average ROUGE"):
         res = generate_and_evaluate(model, tokenizer, text, device)
         if res is None:
             continue
