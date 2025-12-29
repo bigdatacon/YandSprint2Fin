@@ -22,6 +22,9 @@ def clean_tweet(text):
     # 4. Удалить специальные символы и цифры (опционально)
     # Оставляем только буквы и пробелы
     text = re.sub(r'[^a-z\s]', ' ', text)
+
+    # 4.5 Удалить хэштеги и символ # (важное исправление!)
+    text = re.sub(r'#', '', text)
     
     # 5. Удалить эмодзи и специальные символы Unicode
     text = re.sub(r'[^\x00-\x7F]+', '', text)
@@ -34,73 +37,66 @@ def clean_tweet(text):
     
     return text
 
-def tokenize_text(text):
+def process_tweets_file(input_file, output_file, max_tweets=100000, random_sample=False):
     """
-    Простая токенизация по пробелам
-    """
-    return text.split()
-
-def process_tweets_file(input_file, output_file):
-    """
-    Основная функция обработки файла с твитами
+    Основная функция обработки файла с твитами с ограничением
+    
+    Args:
+        input_file: входной файл с твитами
+        output_file: выходной файл
+        max_tweets: максимальное количество твитов для обработки
+        random_sample: если True - случайная выборка, если False - первые N
     """
     print(f"Чтение файла {input_file}...")
     
-    # Чтение файла
-    with open(input_file, 'r', encoding='utf-8', errors='ignore') as f:
-        tweets = f.readlines()
+    if random_sample:
+        # Читаем все строки для случайной выборки
+        with open(input_file, 'r', encoding='utf-8', errors='ignore') as f:
+            all_tweets = f.readlines()
+        
+        print(f"Всего твитов в файле: {len(all_tweets)}")
+        
+        if len(all_tweets) > max_tweets:
+            tweets = random.sample(all_tweets, max_tweets)
+            print(f"Взята случайная выборка из {max_tweets} твитов")
+        else:
+            tweets = all_tweets
+            print(f"Используются все {len(tweets)} твитов")
+    else:
+        # Читаем только первые N строк
+        tweets = []
+        with open(input_file, 'r', encoding='utf-8', errors='ignore') as f:
+            for i, line in enumerate(f):
+                if i >= max_tweets:
+                    break
+                tweets.append(line)
+        
+        print(f"Загружено {len(tweets)} твитов (первые {max_tweets})")
     
-    print(f"Загружено {len(tweets)} твитов")
-    
-    processed_data = []
+    processed_texts = []
     
     # Обработка каждого твита с прогресс-баром
     for tweet in tqdm(tweets, desc="Обработка твитов"):
         cleaned_text = clean_tweet(tweet)
         
-        # Пропускаем пустые строки после очистки
-        if cleaned_text and len(cleaned_text) > 3:  # Минимальная длина
-            tokens = tokenize_text(cleaned_text)
-            
-            # Сохраняем как очищенный текст и как список токенов
-            processed_data.append({
-                'original': tweet.strip()[:100],  # Первые 100 символов оригинала
-                'cleaned_text': cleaned_text,
-                'tokens': tokens,
-                'token_count': len(tokens)
-            })
+        if cleaned_text and len(cleaned_text) > 3:
+            processed_texts.append(cleaned_text)
     
-    # Создание DataFrame
-    df = pd.DataFrame(processed_data)
+    # Сохранение
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    with open(output_file, 'w', encoding='utf-8') as f:
+        for text in processed_texts:
+            f.write(text + '\n')
     
-    # Сохранение в CSV
-    df.to_csv(output_file, index=False, encoding='utf-8')
+    print(f"\nСтатистика:")
+    print(f"Обработано твитов: {len(processed_texts)}")
+    print(f"Сохранено в: {output_file}")
     
-    # Вывод статистики
-    print(f"\nСтатистика обработки:")
-    print(f"Обработано твитов: {len(processed_data)}")
-    print(f"Сохранено в файл: {output_file}")
-    
-    if not df.empty:
-        avg_tokens = df['token_count'].mean()
-        print(f"Среднее количество токенов на твит: {avg_tokens:.2f}")
-        
-        # Примеры очищенных твитов
-        print("\nПримеры очищенных твитов:")
-        for i, row in df.head(3).iterrows():
-            print(f"{i+1}. Оригинал: {row['original']}...")
-            print(f"   Очищенный: {row['cleaned_text']}")
-            print(f"   Токены: {row['tokens']}")
-            print()
-    
-    return df
+    return processed_texts
 
 # Основная часть скрипта
 if __name__ == "__main__":
-    # Файлы
-    # input_file = "tweets.txt"
-    # output_file = "dataset_processed.csv"
-        # Получаем путь к директории, где находится текущий скрипт
+    # Получаем путь к директории, где находится текущий скрипт
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
     # Поднимаемся на уровень выше (из src в корень проекта)
@@ -108,14 +104,14 @@ if __name__ == "__main__":
     
     # Формируем пути
     input_file = os.path.join(project_root, "data", "tweets.txt")
-    output_file = os.path.join(project_root, "data", "dataset_processed.csv")
+    output_file = os.path.join(project_root, "data", "dataset_processed.txt")  # Меняем на .txt
     
     print(f"Путь к исходному файлу: {input_file}")
     print(f"Путь к выходному файлу: {output_file}")
     
     # Запуск обработки
     try:
-        df_processed = process_tweets_file(input_file, output_file)
+        processed_texts = process_tweets_file(input_file, output_file)
         print("Обработка завершена успешно!")
         
     except FileNotFoundError:
